@@ -96,6 +96,8 @@
 | Button 5PCS | ファンの停止 |
 | 4 Digit 7-Segment Display 1PC | 温度の表示 |
 | Active Buzzer 1PC | ファン動作時のアラート音 |
+| Power Supply Module 1PC | モータードライバーに電流を流す |
+| L293D 1PC(モータードライバー) | DCモーターを制御する |
 
 ---
 
