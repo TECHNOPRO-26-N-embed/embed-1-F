@@ -41,7 +41,6 @@
   playing : bool = false              // 再生中かどうか(falseがオフ)
 
 【タイマー（millis()用）】（basic_design.md 2-3 から転記）
-  unsigned long lastMillis_ClapJudge = 0;  // 0.5秒判定
   unsigned long lastNoteTime = 0;          // 前回音から、次の音へ進む基準時刻
   unsigned long lastTriggerTime = 0;       // 入力無効
 
@@ -109,7 +108,6 @@
    - noteIndex を 0（最初の音）に設定する
 
 4. タイマー変数の初期化
-   - 拍手判定の時刻（lastMillis_ClapJudge）を 0 にする
    - 前回音を鳴らした時刻（lastNoteTime）を 0 にする
    - 最後に操作を受け付けた時刻（lastTriggerTime）を 0 にする
    - 最後に拍手を検出した時刻（lastClapTime）を 0 にする
