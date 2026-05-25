@@ -138,10 +138,14 @@
 |:--|:--|:--|:--|:--|:--|
 | currentState | 現在の状態（0:待機 1:モーター作動 2:機能停止） | int | 2B | 0 | 状態遷移で更新 |
 | soundDetected | サウンドセンサーの検知結果（音あり/なし） | bool | 1B | false | 閾値判定後の結果 |
+|soundBuffer[5]|サウンドセンサーの過去五回分の値|int[5]|10B|{0,0,0,0,0}|取得の度更新|
+| soundValue | サウンドセンサーの移動平均値 | int | 2B | 0 | ノイズ除去後のADC値。detectSound()で更新 |
 | soundStartMillis | 音の検知が始まった時刻 | unsigned long | 4B | 0 | 音の継続時間判定に使用 |
 | temperatureC | 現在の温度（℃） | float | 4B | 0.0 | DHT11から取得 |
 | humidityPct | 現在の湿度（%） | float | 4B | 0.0 | DHT11から取得（表示・監視用） |
 | buttonPressed | チャタリング処理後のボタン状態 | bool | 1B | false | 押下時に機能停止へ遷移 |
+| buttonPrevState | 前回のボタン状態 | bool | 1B | false | チャタリング対策用 |
+| lastDebounceTime | 前回の判定時刻（ms） | unsigned long | 4B | 0 | チャタリング対策用（50msデバウンス） |
 | motorOnTempC | モーターON温度しきい値 | float | 4B | 28.0 | 任意機能で変更可能 |
 | motorOffTempC | モーターOFF温度しきい値 | float | 4B | 26.0 | 任意機能で変更可能 |
 | overTempStartMillis | 温度>=28℃が継続し始めた時刻 | unsigned long | 4B | 0 | 5秒継続判定に使用 |
@@ -165,7 +169,7 @@
 > [!CAUTION]
 > **SRAM使用量チェック（Arduino UNO R3 の上限は 2048B）**
 >
-> グローバル変数の合計: ＿＿117＿ B
+> グローバル変数の合計: ＿＿127＿ B
 >
 > | 合計バイト数 | 判定 |
 > |:--|:--|
