@@ -23,6 +23,7 @@
 | 作品タイトル | 二種類のセンサを用いた送風機 |
 | 状態の種類（いくつの状態があるか） | 3 |
 | 実装する関数の数 | 15 |
+| グローバル変数の合計バイト数（2-1 SRAM確認から） | 　130B |
 
 ---
 
@@ -91,6 +92,9 @@ unsigned long overTempRequiredMs = 5000; // モーター起動に必要な継続
 unsigned long sensorReadIntervalMs = 100; // センサー読取り周期（ms）
 bool abnormalLogFlag = false;    // 異常値検出フラグ
 char abnormalLogBuffer[64] = ""; // 異常値内容バッファ
+bool tempStartConditionMet = false;       // 温度起動条件成立フラグ（judgeTemperatureで更新）
+bool tempStopConditionMet = false;        // 温度停止条件成立フラグ（judgeTemperatureで更新）
+bool soundTimeoutStopConditionMet = false; // 無音60秒停止条件成立フラグ（judgeSoundで更新）
 ```
 
 **↓ 自分のプログラムに合わせて書き直してください**
@@ -151,6 +155,9 @@ unsigned long overTempRequiredMs = 5000; // モーター起動に必要な継続
 unsigned long sensorReadIntervalMs = 100; // センサー読取り周期（ms）
 bool abnormalLogFlag = false;    // 異常値検出フラグ
 char abnormalLogBuffer[64] = ""; // 異常値内容バッファ
+bool tempStartConditionMet = false;       // 温度起動条件成立フラグ（judgeTemperatureで更新）
+bool tempStopConditionMet = false;        // 温度停止条件成立フラグ（judgeTemperatureで更新）
+bool soundTimeoutStopConditionMet = false; // 無音60秒停止条件成立フラグ（judgeSoundで更新）
 ```
 
 ---
@@ -248,35 +255,40 @@ currentState が 3（エラー）のとき：
 
 毎回やること：
    - now = millis() を取得
-   - readButton() を呼んで buttonPressEvent を更新（押下イベント方式）
+   - readButton(now) を呼んで buttonPressEvent を更新（押下イベント方式）
    - now - lastSensorReadMillis >= sensorReadIntervalMs のときのみ
      detectSound(), readTemperature(), readHumidity() を実行して値更新
      lastSensorReadMillis = now に更新
-   - judgeSound(), judgeTemperature() を呼んで判定結果を更新
+    - judgeSound(now), judgeTemperature(now) を呼んで判定結果フラグを更新
    - abnormalLogFlag が true の場合は logAbnormalValues() を実行
 
 currentState が 0（待機中）のとき：
-   - buttonPressEvent が true なら currentState = 2（機能停止）へ遷移
-   - soundDetected が true かつ temperatureC >= motorOnTempC のとき：
-     - overTempStartMillis が 0 なら overTempStartMillis = now
-     - now - overTempStartMillis >= overTempRequiredMs（5000ms）なら
-       controlFan() でモーターON（一定速度）
-       currentState = 1（モーター作動）へ遷移
-   - 上記条件を満たさない場合は overTempStartMillis = 0 に戻す
+   - buttonPressEvent が true なら
+     - handleStop() を呼ぶ（機能停止遷移と停止出力を集約）
+     - return でこのloop周回を打ち切る
+    - soundDetected が true かつ tempStartConditionMet が true のとき：
+       - controlFan() でモーターON（一定速度）
+       - currentState = 1（モーター作動）へ遷移
+       - return でこのloop周回を打ち切る
 
 currentState が 1（モーター作動中）のとき：
-    - buttonPressEvent が true なら currentState = 2（機能停止）へ遷移
-   - temperatureC <= motorOffTempC（26℃以下）なら
-       controlFan() でモーターOFF
-       currentState = 0（待機中）へ遷移
-   - soundDetected が true の間は soundStartMillis = 0（無検知タイマをリセット）
-   - soundDetected が false になった瞬間に soundStartMillis = now を記録
-   - soundDetected が false のまま now - soundStartMillis >= 60000 のとき
-     currentState = 0（待機中）へ遷移し controlFan() でモーターOFF
+    - buttonPressEvent が true なら
+       - handleStop() を呼ぶ（機能停止遷移と停止出力を集約）
+       - return でこのloop周回を打ち切る
+    - tempStopConditionMet が true または soundTimeoutStopConditionMet が true なら
+       - currentState = 0（待機中）へ遷移
+       - controlFan() でモーターOFF
+       - return でこのloop周回を打ち切る
 
 currentState が 2（機能停止中）のとき：
    - controlFan() でモーターOFFを維持
-   - buttonPressEvent が true（再押下）なら currentState = 0（待機中）へ遷移
+   - buttonPressEvent が true（再押下）なら
+     - currentState = 0（待機中）へ遷移
+     - return でこのloop周回を打ち切る
+
+状態分岐の実装方針：
+   - currentState の分岐は if - else if - else で排他的に実装する
+   - 1周回で状態遷移は1回までとし、遷移後は必ず return で抜ける
 
 異常時（センサー読取り失敗が連続）のとき：
    - 安全側として controlFan() でモーターOFF
@@ -295,8 +307,10 @@ currentState が 2（機能停止中）のとき：
 
 ### `readButton()` — （共通）チャタリング処理済みの押下イベントを返す
 
+**basic_design.md 2-2 との対応：** チャタリング処理済みのボタン状態を返す
+
 **引数：**
-- なし
+- `unsigned long now`：loop() で取得した現在時刻（ms）
 
 **戻り値：**
 - `bool`：押下イベント（非押下→押下になった瞬間のみtrue）
@@ -317,6 +331,7 @@ currentState が 2（機能停止中）のとき：
 ---
 
 ### `detectSound()` — サウンドセンサー値を取得し音検知結果を更新する
+**basic_design.md 2-2 との対応：** サウンドセンサー値を取得しsoundDetected(変数)を更新
 
 **引数：**
 - なし
@@ -327,41 +342,44 @@ currentState が 2（機能停止中）のとき：
 ```
 【処理の流れ】
 1. analogRead(pinSoundSensor) でサウンドセンサーの値を取得し、一時変数に格納
-2. 取得値が0～1023の範囲内か isfinite() で確認し、異常値なら前回値を保持し abnormalLogFlag を立てる
+2. 取得値が0～1023の範囲内か確認し、異常値なら前回値を保持し abnormalLogFlag を立てる
 3. 5点移動平均を計算し、ノイズを除去した値を soundValue に格納
 4. 閾値（例: 40dB相当のADC値）と比較し、音を検知したか判定
 5. 判定結果を soundDetected 変数に反映し、true/false を戻り値として返す
 
 【エラーケース】
-- analogRead()が範囲外やNaNを返した場合は、前回正常値を保持し、abnormalLogBufferに内容を記録
+- analogRead()が範囲外の値を返した場合は、前回正常値を保持し、abnormalLogBufferに内容を記録
 ```
 
 ---
 
 
 ### `judgeSound()` — 音の有無と継続時間を判定し状態遷移に反映する
+**basic_design.md 2-2 との対応：** 音の有無・継続時間(soundStartMillis(変数))を判定し状態遷移に反映
 
 **引数：**
-- なし
+- `unsigned long now`：loop() で取得した現在時刻（ms）
 
 **戻り値：**
 - `void`：なし
 
 ```
 【処理の流れ】
-1. soundDetected が true の場合：soundStartMillis を 0 にリセット（無検知タイマをリセット）
-2. soundDetected が false になった瞬間（前回true→今回false）に soundStartMillis = now（millis()）を記録
-3. soundDetected が false のまま now - soundStartMillis >= 60000ms（60秒）なら、ファン停止などの状態遷移条件を満たす
-4. 状態遷移用のフラグや変数を必要に応じて更新
+1. soundTimeoutStopConditionMet を false で初期化
+2. soundDetected が true の場合：soundStartMillis を 0 にリセット（無検知タイマをリセット）
+3. soundDetected が false かつ soundStartMillis == 0 の場合：soundStartMillis = now（引数）を記録
+4. soundDetected が false のまま now - soundStartMillis >= 60000ms（60秒）なら soundTimeoutStopConditionMet = true
+5. 状態遷移用フラグ soundTimeoutStopConditionMet を更新して終了
 
 【エラーケース】
-- soundDetected の値が不定や異常な場合は、安全側（無検知扱い）として soundStartMillis を進める
+- soundDetected の値が不定や異常な場合は、安全側（無検知扱い）として soundTimeoutStopConditionMet = true にする
 ```
 
 ---
 
 
 ### `readTemperature()` — DHT11から温度を取得してtemperatureCを更新する
+**basic_design.md 2-2 との対応：** DHT11から温度を取得しtemperatureC(変数)を更新
 
 **引数：**
 - なし
@@ -384,21 +402,23 @@ currentState が 2（機能停止中）のとき：
 
 
 ### `judgeTemperature()` — 温度しきい値を判定して起動・停止条件を決定する
+**basic_design.md 2-2 との対応：** 温度(motorOnTempC(変数), motorOffTempC(変数))がしきい値を超えているか判定
 
 **引数：**
-- なし
+- `unsigned long now`：loop() で取得した現在時刻（ms）
 
 **戻り値：**
 - `void`：なし
 
 ```
 【処理の流れ】
-1. temperatureC >= motorOnTempC（28℃以上）の場合：
-   - overTempStartMillis が 0 なら overTempStartMillis = now（millis()）を記録
-   - now - overTempStartMillis >= overTempRequiredMs（5000ms）ならファン起動条件を満たす
-2. temperatureC < motorOnTempC の場合：overTempStartMillis = 0 にリセット（継続時間をリセット）
-3. temperatureC <= motorOffTempC（26℃以下）の場合：ファン停止条件を満たす
-4. 状態遷移用のフラグや変数を必要に応じて更新
+1. tempStartConditionMet = false、tempStopConditionMet = false で初期化
+2. temperatureC >= motorOnTempC（28℃以上）の場合：
+   - overTempStartMillis が 0 なら overTempStartMillis = now（引数）を記録
+   - now - overTempStartMillis >= overTempRequiredMs（5000ms）なら tempStartConditionMet = true
+3. temperatureC < motorOnTempC の場合：overTempStartMillis = 0 にリセット（継続時間をリセット）
+4. temperatureC <= motorOffTempC（26℃以下）の場合：tempStopConditionMet = true
+5. 状態遷移用フラグ tempStartConditionMet / tempStopConditionMet を更新して終了
 
 【エラーケース】
 - temperatureC が異常値や不定の場合は、安全側（ファン停止）として扱う
@@ -408,6 +428,7 @@ currentState が 2（機能停止中）のとき：
 
 
 ### `readHumidity()` — DHT11から湿度を取得してhumidityPctを更新する
+**basic_design.md 2-2 との対応：** DHT11から湿度を取得しhumidityPct(変数)を更新
 
 **引数：**
 - なし
@@ -430,6 +451,7 @@ currentState が 2（機能停止中）のとき：
 
 
 ### `controlFan()` — 現在状態に応じてファンのON/OFFを切り替える
+**basic_design.md 2-2 との対応：** 状態(currentState(変数))に応じてファンON/OFFを切り替える
 
 **引数：**
 - なし
@@ -453,6 +475,7 @@ currentState が 2（機能停止中）のとき：
 
 
 ### `handleStop()` — ボタン押下時に機能停止状態への遷移を処理する
+**basic_design.md 2-2 との対応：** ボタン押下(buttonPressEvent(変数))時に機能停止状態へ遷移
 
 **引数：**
 - なし
@@ -462,13 +485,14 @@ currentState が 2（機能停止中）のとき：
 
 ```
 【処理の流れ】
-1. ボタン押下時にcurrentState=2（機能停止）へ遷移
-2. controlFan()でファンをOFF
-3. 必要に応じてブザーや7セグメント表示も停止状態にする
+1. 前提条件：buttonPressEvent == true のときに loop() から呼び出す
+2. currentState=2（機能停止）へ遷移
+3. controlFan()でファンをOFF
+4. 必要に応じてブザーや7セグメント表示も停止状態にする
 
 【エラーケース】
 - 異常な値が来た場合：
-   - currentStateやbuttonPressedが不定の場合も、安全側（ファンOFF・出力OFF）を優先
+   - currentStateやbuttonPressEventが不定の場合も、安全側（ファンOFF・出力OFF）を優先
    - 異常値検出時はabnormalLogBufferに内容を記録し、abnormalLogFlagを立てる
 ```
 
@@ -476,6 +500,7 @@ currentState が 2（機能停止中）のとき：
 
 
 ### `displayTemperature()` — 7セグメントに温度を表示する
+**basic_design.md 2-2 との対応：** 7セグメントでtemperatureC(変数)を表示
 
 **引数：**
 - なし
@@ -502,6 +527,7 @@ currentState が 2（機能停止中）のとき：
 
 
 ### `controlAlert()` — ファン作動状態に応じてアラートを制御する
+**basic_design.md 2-2 との対応：** ファン作動時のアラート音制御
 
 **引数：**
 - なし
@@ -528,6 +554,7 @@ currentState が 2（機能停止中）のとき：
 
 
 ### `logAbnormalValues()` — 異常値をシリアルにログ出力する
+**basic_design.md 2-2 との対応：** 異常値(abnormalLogFlag(変数), abnormalLogBuffer(変数))検出時にシリアルへログ出力
 
 **引数：**
 - なし
@@ -560,16 +587,18 @@ currentState が 2（機能停止中）のとき：
 - ボタンの生値（digitalRead(pinButton) の値
 - 前回のボタン状態
 - 前回の判定時刻
+- now（loop() から引数で受け取る現在時刻）
 
 【処理】：
 1. 現在のボタン入力値を取得
 2. 前回の値と異なる場合、現在時刻との差分を計算
 3. 50ms以上経過していれば「状態変化あり」と判定し、ボタン状態を更新
 4. 50ms未満ならノイズ（チャタリング）とみなして無視
-5. 判定結果をbuttonPressed変数に反映
+5. 前回が非押下（HIGH）かつ今回が押下（LOW）のときのみ buttonPressEvent=true にする
+6. それ以外は buttonPressEvent=false にする
 
 【出力】：
-- チャタリング除去後のボタン状態（true/false）
+- 押下イベント（非押下→押下の瞬間のみtrue）
 ```
 
 ## 疑似コード
@@ -577,22 +606,28 @@ currentState が 2（機能停止中）のとき：
 1. int rawButton = digitalRead(pinButton) で現在のボタン入力値を取得
 2. if (rawButton != buttonPrevState) {
       // 状態が変化した場合
-      unsigned long now = millis();
       if (now - lastDebounceTime >= 50) {
           // 50ms以上経過していれば有効な変化
+        bool prevStable = buttonPrevState;
           buttonPrevState = rawButton;
           if (rawButton == LOW) {
               buttonPressed = true;  // 押下
           } else {
               buttonPressed = false; // 非押下
           }
+        if (prevStable == HIGH && rawButton == LOW) {
+           buttonPressEvent = true;
+        } else {
+           buttonPressEvent = false;
+        }
       }
       lastDebounceTime = now;
    }
    // 50ms未満なら何もしない（前回の状態を維持）
+3. rawButton == buttonPrevState の場合は buttonPressEvent = false（押下瞬間ではないため）
 
 【出力】：
-- buttonPressed（チャタリング除去後のボタン状態 true/false）
+- buttonPressEvent（非押下→押下の瞬間のみ true）
 ```
 
 ### 3-2. サウンドセンサー移動平均処理
@@ -608,7 +643,7 @@ currentState が 2（機能停止中）のとき：
 3. 計算結果をsoundValueに格納
 
 【出力】：
-- ノイズ除去後のサウンドセンサー値（int型）
+- 音検知結果（bool型: true/false）
 ```
 
 ## 疑似コード
@@ -617,15 +652,16 @@ currentState が 2（機能停止中）のとき：
 2. if (nowSoundSensor < 0 || nowSoundSensor > 1023) then
    - abnormalLogBuffer に "Sound sensor out of range" を記録
    - abnormalLogFlag = true
-   - 前回の soundValue をそのまま返す
+   - soundDetected = false
+   - soundDetected を戻り値として返す
 3. グローバル変数 soundBuffer[5] を使い、古い値を後ろへシフトする
    - for i = 4 から 1 まで:
      soundBuffer[i] = soundBuffer[i - 1]
 4. soundBuffer[0] = nowSoundSensor を格納
 5. sum = soundBuffer[0] + soundBuffer[1] + soundBuffer[2] + soundBuffer[3] + soundBuffer[4]
 6. soundValue = sum / 5 を計算して更新
-7. 閾値と比較して soundDetected を更新する（例: soundValue >= SOUND_THRESHOLD）
-8. soundValue を戻り値として返す
+7. 閾値と比較して soundDetected を更新する（例: soundValue >= SOUND_THRESHOLD ? true : false）
+8. soundDetected を戻り値として返す
 ```
 
 ### 3-3. 温度しきい値判定ロジック
@@ -648,27 +684,28 @@ currentState が 2（機能停止中）のとき：
 
 ## 疑似コード
 ```
-1. now = millis() を取得
+1. （前提）now は loop() から引数で受け取る
 2. if temperatureC が有限値でない または 想定範囲外（例: 0未満 or 50超） then
    - abnormalLogBuffer に "Temperature invalid" を記録
    - abnormalLogFlag = true
-   - startConditionMet = false
-   - stopConditionMet = true
+   - tempStartConditionMet = false
+   - tempStopConditionMet = true
    - overTempStartMillis = 0
    - return
-3. startConditionMet = false
-4. stopConditionMet = false
+3. tempStartConditionMet = false
+4. tempStopConditionMet = false
 5. if temperatureC >= motorOnTempC then
    - if overTempStartMillis == 0 then
      overTempStartMillis = now
    - if (now - overTempStartMillis) >= overTempRequiredMs then
-   startConditionMet = true
+   tempStartConditionMet = true
 6. else
    - overTempStartMillis = 0
 7. if temperatureC <= motorOffTempC then
-   stopConditionMet = true
-8. 判定結果フラグ（startConditionMet / stopConditionMet）を更新して終了
+   tempStopConditionMet = true
+8. 判定結果フラグ（tempStartConditionMet / tempStopConditionMet）を更新して終了
 ```
+
 
 ### 3-4. 異常値ログ出力処理
 
@@ -700,43 +737,68 @@ currentState が 2（機能停止中）のとき：
 6. 終了
 ```
 
+
 ---
 
-## 4. テスト仕様書
+## 4. デバッグ出力計画（任意）
+
+> **【任意】** 関数設計（Section 2）と並行して記入すると効果的です。
+> 「動かない」ときに何を確認すればいいかを事前に計画しておきます。
+> 実装後は不要な Serial.println() を削除すること。
+
+| No | 確認したい内容 | 挿入する関数 | Serial.println の内容例 |
+|:---|:---|:---|:---|
+| 1 | センサー値が正しく取れているか | `readSensor()` | `Serial.println(sensorValue);` |
+| 2 | 状態遷移が正しく起きているか | `loop()` | `Serial.println(currentState);` |
+| 3 | チャタリング処理が効いているか | `readButton()` | `Serial.println("btn confirmed");` |
+| 4 |  |  |  |
+
+---
+
+## 5. テスト仕様書
 
 > ※ 実装が終わったら、各機能が「正しく動いているか」を確認するテストを定義します。  
 > テスト実施後に「実際の結果」と「合否」を記入してください。
 
-### 4-1. 単体テスト（部品・関数ごと）
+### 5-1. 単体テスト（部品・関数ごと）
 
 | No | テスト対象 | 入力・操作 | 期待する結果 | 実際の結果 | 合否 |
 |:---|:---|:---|:---|:---|:---|
-| 1 | LED（赤）の点灯 | PIN_LED_RED に HIGH を送る | 赤LEDが点灯する | | [ ] |
-| 2 | ボタン読み取り | タクトスイッチを押す | buttonPressed が true になる | | [ ] |
-| 3 | （自分のテストを追加） | | | | [ ] |
-| 4 |  |  |  |  | [ ] |
+| 1 | `readButton(now)` | ボタンを1回押下して離す（50ms以上保持） | 押下瞬間の1回だけ `buttonPressEvent=true`、それ以外は `false` | | [ ] |
+| 2 | `detectSound()` | サウンドセンサーに音を入力し、閾値以上/未満を切替 | 閾値以上で `soundDetected=true`、未満で `false`。`soundValue` が移動平均で更新される | | [ ] |
+| 3 | `judgeTemperature(now)` | 温度を28℃以上で5秒維持 → 26℃以下に低下 | 5秒後に `tempStartConditionMet=true`、26℃以下で `tempStopConditionMet=true` | | [ ] |
+| 4 | `controlFan()` | `currentState` を 0/1/2 に切替 | state=1でモーターON、state=0または2でモーターOFF | | [ ] |
 
-### 4-2. 機能テスト（必須機能ごと）
+### 5-2. 機能テスト（必須機能ごと）
 
 > ※ requirements.md の「3-1. 必須機能」を1つずつ検証します。
 
 | No | 必須機能（requirements.md から転記） | テスト手順 | 期待する結果 | 実際の結果 | 合否 |
 |:---|:---|:---|:---|:---|:---|
-| 1 | （requirements.mdの必須機能①を転記） | | | | [ ] |
-| 2 | （requirements.mdの必須機能②を転記） | | | | [ ] |
-| 3 | （requirements.mdの必須機能③を転記） | | | | [ ] |
+| 1 | 音を検知できる（60秒間の間に40〜60dBを感知） | 音を入力し、`soundDetected` が true になることを確認。無音を60秒継続する | 音入力時に検知し、無音60秒継続で停止条件 `soundTimeoutStopConditionMet=true` になる | | [ ] |
+| 2 | 温度と湿度を検知できる | DHT11から温湿度を読み取り、シリアル表示または変数値を確認 | `temperatureC` と `humidityPct` が更新され、範囲内値を取得できる | | [ ] |
+| 3 | 温度（5秒間28℃以上）によって一定速度でファンを回せる | 28℃以上を5秒維持し、状態遷移を確認 | `tempStartConditionMet=true` 後に `currentState=1` となり、ファンが一定速度で回転 | | [ ] |
+| 4 | 手動（ボタン）でファンを止める（ON/OFF） | 動作中にボタンを1回押下し、その後再押下 | 1回目で `handleStop()` が呼ばれ機能停止（state=2）、2回目で待機（state=0）へ戻る | | [ ] |
+| 5 | 自動的（26℃以下）にファンを止める | 動作中に温度を26℃以下へ下げる | `tempStopConditionMet=true` となり、`currentState=0` に遷移してファン停止 | | [ ] |
+| 6 | 起動温度境界（28℃） | 温度を 27.9℃ / 28.0℃ / 28.1℃ に設定し、それぞれ5秒維持して比較 | 27.9℃では起動しない。28.0℃と28.1℃では5秒後に起動条件成立 | | [ ] |
+| 7 | 停止温度境界（26℃） | 動作中に温度を 26.1℃ / 26.0℃ / 25.9℃ に設定して比較 | 26.1℃では停止しない。26.0℃と25.9℃で停止条件成立 | | [ ] |
+| 8 | 無音時間境界（60秒） | 無音継続時間を 59999ms / 60000ms / 60001ms で比較 | 59999msでは停止しない。60000ms以上で停止条件成立 | | [ ] |
+| 9 | 競合時の優先順位 | 動作中に「ボタン押下」と「自動停止条件成立」を同一周回で発生させる | 分岐順どおり手動停止（`handleStop()`）が優先され、state=2へ遷移 | | [ ] |
 
-### 4-3. 異常系テスト
+### 5-3. 異常系テスト
 
 | No | 異常ケース（basic_design.md 4章から転記） | テスト手順 | 期待する動作 | 実際の結果 | 合否 |
 |:---|:---|:---|:---|:---|:---|
-| 1 | センサー値が範囲外 | センサーを遮蔽・最大距離に向ける | 処理がスキップされる | | [ ] |
-| 2 | チャタリング | ボタンを素早く2回押す | 1回として認識される | | [ ] |
-| 3 | （自分の異常ケースを追加） | | | | [ ] |
+| 1 | センサー異常値（温度<0℃ / >50℃、音ADC<0 / >1023） | 異常値を模擬入力（センサー切断やテスト値注入） | 異常値を破棄し前回正常値を維持。`abnormalLogFlag=true` でログ出力される | | [ ] |
+| 2 | チャタリング | ボタンを短時間で連打（50ms未満の揺れを含む） | チャタリングは無視され、押下イベントは有効押下の瞬間のみ1回発生 | | [ ] |
+| 3 | DHT11読み取り失敗 | DHT11を一時的に未接続にして読み取り | 温湿度の前回正常値を保持し、異常ログを記録。安全側制御を維持 | | [ ] |
+| 4 | 状態不整合入力（停止中に再停止要求など） | `currentState=2` 中に停止イベントを連続発生 | 状態が破綻せず、排他分岐と `return` で1周回1遷移を維持 | | [ ] |
+| 5 | デバウンス境界（50ms） | ボタン変化間隔を 49ms / 50ms / 51ms で入力 | 49msは無視、50msと51msは有効押下として扱う | | [ ] |
+| 6 | 異常ログ後処理 | 異常値を発生させて `logAbnormalValues()` 実行後のフラグ/バッファ確認 | ログ出力後に `abnormalLogFlag=false`、`abnormalLogBuffer` は空文字に戻る | | [ ] |
 
 ---
 
-## 5. AIレビュー記録（詳細設計版）
+## 6. AIレビュー記録（詳細設計版）
 
 ### Q1: 実装上の問題確認
 > 「この詳細設計書に書いた関数と処理フローをもとにArduinoコードを書きます。  
@@ -752,6 +814,14 @@ currentState が 2（機能停止中）のとき：
 - `now` の取得元（関数内 `millis()` か引数渡し）を統一しないと実装時にぶれやすい。
 
 **対応した内容：**
+- 該当コードを確認した
+- `loop()` から温度継続判定・無音継続判定の詳細ロジックを外し、`judgeSound()/judgeTemperature()` が更新する判定結果フラグ（`soundTimeoutStopConditionMet`, `tempStartConditionMet`, `tempStopConditionMet`）のみを参照する構成に統一した。
+- `loop()` の状態分岐を if - else if - else の排他構成で実装する方針を明記し、状態遷移直後は return で同一周回の残り処理を打ち切る運用を追加した。
+- 停止遷移処理を `handleStop()` に集約し、`loop()` での `buttonPressEvent` 判定時は `handleStop()` 呼び出しに統一して、呼び出し位置と責務分担を明確化した。
+- `displayTemperature()/controlAlert()`については現状作成予定が未定なので、現状維持とする
+- `detectSound()`は疑似コードをTrue/Falseを戻り値とするように修正した。
+- 3-1チャタリング防止疑似コードを押下イベント方式に修正し、`buttonPressEvent` を出力する内容に統一した。
+- `now` は `loop()` で1回取得し、`readButton(now)`, `judgeSound(now)`, `judgeTemperature(now)` に引数渡しする方針に統一した。
 
 ---
 
@@ -760,14 +830,21 @@ currentState が 2（機能停止中）のとき：
 > テストが不足している項目や、境界値テストが必要な箇所を教えてください。」
 
 **AIの回答（要約）：**
+- 必須機能5件の網羅はできている。
+- ただし境界値テスト（28℃/26℃、60秒、50ms）と競合時の優先順位テストが不足している。
+- 異常系では、異常ログの後処理（フラグとバッファのリセット確認）も追加すべき。
 
 **対応した内容：**
+- 5-2 に境界値テストを追加（起動温度境界、停止温度境界、無音60秒境界）。
+- 5-2 に競合時優先順位テストを追加（手動停止 vs 自動停止の同時成立）。
+- 5-3 にデバウンス境界（50ms）テストを追加。
+- 5-3 に異常ログ後処理確認テストを追加（`abnormalLogFlag`/`abnormalLogBuffer` の復帰確認）。
 
 ---
 
-## 6. グループレビュー記録
+## 7. グループレビュー記録
 
-### 6-1. 指摘一覧
+### 7-1. 指摘一覧
 
 | No | 指摘内容 | 対応 |
 |:---|:---|:---|
@@ -775,9 +852,9 @@ currentState が 2（機能停止中）のとき：
 | 2 |  |  |
 | 3 |  |  |
 
-### 6-2. レビューを受けて変更した点
+### 7-2. レビューを受けて変更した点
 
-- 
+- 特になし(指摘がなかったため)
 
 ---
 
