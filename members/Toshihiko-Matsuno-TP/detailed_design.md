@@ -634,4 +634,146 @@
 
 ---
 
+
+8-1「星の奏でる歌」の仮コード
+const int buzzerPin = 8;
+
+// ===== テンポ =====
+int tempo = 75;
+float beat = 60000.0 / tempo;
+
+// ===== 音階（原曲キー F#系）=====
+#define F_SHARP4 370
+#define G_SHARP4 415
+#define A_SHARP4 466
+#define B4 494
+#define C_SHARP5 554
+#define D_SHARP5 622
+#define F_SHARP5 740
+
+#define E5 659
+#define F5 698
+#define G5 784
+
+
+#define G_SHARP5 831
+#define A_SHARP5 932
+
+// ===== メロディ（1番 / 原曲キー変換済）=====
+int melody[] = {
+
+  // ♪ 探し物 ひとつ
+  A_SHARP4,A_SHARP4,B4,C_SHARP5, C_SHARP5,B4,A_SHARP4,G_SHARP4,
+
+  // ♪ 星の 笑う声
+  A_SHARP4,B4,C_SHARP5,D_SHARP5, C_SHARP5,B4,A_SHARP4,0,
+
+  // ♪ 風に またたいて
+  C_SHARP5,D_SHARP5,F_SHARP5,E5, D_SHARP5,C_SHARP5,A_SHARP4,0,
+
+  // ♪ 手を伸ばせば
+  A_SHARP4,B4,C_SHARP5,D_SHARP5, C_SHARP5,A_SHARP4,G_SHARP4,0,
+
+  // ♪ 掴めるよ
+  A_SHARP4,C_SHARP5,D_SHARP5,C_SHARP5, A_SHARP4,0,
+
+  0,0,
+
+  // ♪ 瞳閉じれば
+  D_SHARP5,C_SHARP5,B4,A_SHARP4, G_SHARP4,A_SHARP4,B4,C_SHARP5,
+
+  // ♪ きっと見つかる
+  D_SHARP5,F5,G5,F5, D_SHARP5,C_SHARP5,A_SHARP4,0,
+
+  // ♪ 迷う君を
+  C_SHARP5,D_SHARP5,F5,E5, D_SHARP5,C_SHARP5,A_SHARP4,0,
+
+  // ♪ 導く光
+  A_SHARP4,B4,C_SHARP5,D_SHARP5, C_SHARP5,B4,A_SHARP4,G_SHARP4,
+
+  // ♪ 耳を澄ませば
+  C_SHARP5,D_SHARP5,F5,G_SHARP5, F5,D_SHARP5,C_SHARP5,0,
+
+  // ♪ きっと聞こえる
+  D_SHARP5,F5,G5,F5, D_SHARP5,C_SHARP5,A_SHARP4,0,
+
+  // ♪ 眠る君に
+  C_SHARP5,D_SHARP5,F5,E5, D_SHARP5,C_SHARP5,A_SHARP4,0,
+
+  // ♪ 奏でる歌が
+  A_SHARP4,C_SHARP5,D_SHARP5,C_SHARP5,
+  A_SHARP4,G_SHARP4,F_SHARP4,0,
+
+  // ラスト
+  F_SHARP5
+};
+
+// ===== リズム =====
+float duration[] = {
+  0.5,0.5,1,1, 0.5,0.5,1,1,
+  0.5,0.5,1,1, 0.5,0.5,2,2,
+
+  0.5,0.5,1,1, 0.5,0.5,2,2,
+  0.5,0.5,1,1, 0.5,1,2,2,
+
+  1,1,1,1, 2,2,
+
+  2,2,
+
+  0.5,0.5,1,1, 0.5,0.5,1,1,
+  0.5,0.5,1,1, 0.5,0.5,2,2,
+
+  0.5,0.5,1,1, 0.5,0.5,2,2,
+  0.5,0.5,1,1, 0.5,0.5,1,1,
+
+  0.5,0.5,1,1, 0.5,0.5,2,2,
+  0.5,0.5,1,1, 0.5,0.5,2,2,
+
+  0.5,0.5,1,1, 0.5,0.5,2,2,
+
+  1,1,1,1,
+  1,1,2,2,
+
+  6
+};
+
+int length = sizeof(melody) / sizeof(melody[0]);
+
+void setup() {
+
+  randomSeed(analogRead(0));
+
+  for (int i = 0; i < length; i++) {
+
+    int noteDuration = beat * duration[i];
+
+    // テンポ揺らぎ
+    float fluctuation = random(92,108)/100.0;
+    int realDuration = noteDuration * fluctuation;
+
+    if (melody[i] == 0) {
+      delay(realDuration);
+    } else {
+
+      int attack = realDuration * 0.2;
+      int sustain = realDuration * 0.6;
+      int release = realDuration * 0.2;
+
+      tone(buzzerPin, melody[i]);
+      delay(attack + sustain);
+
+      tone(buzzerPin, melody[i] - 3);
+      delay(release);
+
+      noTone(buzzerPin);
+    }
+
+    delay(realDuration * 0.5);
+  }
+
+  delay(3000);
+}
+
+void loop() {}
+
 *初版: YYYY-MM-DD / AIレビュー: YYYY-MM-DD / グループレビュー後更新: YYYY-MM-DD*
