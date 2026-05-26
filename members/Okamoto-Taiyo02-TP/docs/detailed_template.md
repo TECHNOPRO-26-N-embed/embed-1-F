@@ -750,7 +750,7 @@ currentState が 2（機能停止中）のとき：
 |:---|:---|:---|:---|
 | 1 | センサー値が正しく取れているか | `readSensor()` | `Serial.println(sensorValue);` |
 | 2 | 状態遷移が正しく起きているか | `loop()` | `Serial.println(currentState);` |
-| 3 | チャタリング処理が効いているか | `readButton()` | `Serial.println("btn confirmed");` |
+| 3 | チャタリング防止処理が効いているか | `readButton()` | `Serial.println("btn confirmed");` |
 | 4 |  |  |  |
 
 ---
@@ -776,7 +776,7 @@ currentState が 2（機能停止中）のとき：
 | No | 必須機能（requirements.md から転記） | テスト手順 | 期待する結果 | 実際の結果 | 合否 |
 |:---|:---|:---|:---|:---|:---|
 | 1 | 音を検知できる（60秒間の間に40〜60dBを感知） | 音を入力し、`soundDetected` が true になることを確認。無音を60秒継続する | 音入力時に検知し、無音60秒継続で停止条件 `soundTimeoutStopConditionMet=true` になる | | [ ] |
-| 2 | 温度と湿度を検知できる | DHT11から温湿度を読み取り、シリアル表示または変数値を確認 | `temperatureC` と `humidityPct` が更新され、範囲内値を取得できる | | [ ] |
+| 2 | 温湿度を検知できる | DHT11から温湿度を読み取り、シリアル表示または変数値を確認 | `temperatureC` と `humidityPct` が更新され、範囲内値を取得できる | | [ ] |
 | 3 | 温度（5秒間28℃以上）によって一定速度でファンを回せる | 28℃以上を5秒維持し、状態遷移を確認 | `tempStartConditionMet=true` 後に `currentState=1` となり、ファンが一定速度で回転 | | [ ] |
 | 4 | 手動（ボタン）でファンを止める（ON/OFF） | 動作中にボタンを1回押下し、その後再押下 | 1回目で `handleStop()` が呼ばれ機能停止（state=2）、2回目で待機（state=0）へ戻る | | [ ] |
 | 5 | 自動的（26℃以下）にファンを止める | 動作中に温度を26℃以下へ下げる | `tempStopConditionMet=true` となり、`currentState=0` に遷移してファン停止 | | [ ] |
