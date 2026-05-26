@@ -63,6 +63,10 @@
 【出力制御】
   sound         : int            = 0  // 曲番号
   noteIndex     : int            = 0  // 現在の音
+
+【曲データ】
+  notesLength[musicCount] : int 配列
+  // 各曲の音の数（例：{16, 12, 20}）
 ```
 
 ---
@@ -163,28 +167,35 @@
   - sensor = analogRead(PIN_SENSOR) で現在値を読む
   - diff = abs(sensor - lastSound) を計算する
 
-2. 入力無効時間中かどうかを確認する
-  - (now - lastTriggerTime) < inputBlockMs の場合:
-    ・clapCount = 0 にリセットする
-    ・firstClapTime = 0 にリセットする
+2. センサー値が異常かどうかを確認する
+  - sensor < 10 または sensor > 1000 の場合:
     ・lastSound = sensor を更新する
-    ・このループでは拍手関連処理（手順3〜5）をスキップし、手順6へ進む
+    ・拍手検出処理（updateClap）は行わない
+    ・判定処理（processClap）も行わない 
+    ・clapCount / firstClapTime は保持する（誤カウント防止のため）
+    ・手順7（音楽再生）へ進む
 
+3. 入力無効時間中かどうかを確認する
+  - (now - lastTriggerTime) < inputBlockMs の場合:
+    ・lastSound = sensor を更新する
+    ・拍手検出条件（手順4）を評価し、成立した場合のみ clapCount を増加させる
+    ・判定処理（手順6） は行わない
+    ・音楽再生（手順7）へ進む 
 
-3. 拍手を検出する（多重検出防止付き）
-  - diff >= clapThreshold を満たすか判定する
+4. 拍手を検出する（多重検出防止付き）
+  - diff >= clapThreshold AND(sensor >= 50) を満たすか判定する（ノイズ除去のため）
   - かつ (now - lastClapTime) >= minClapIntervalMs の場合のみ拍手として採用する
   - 条件を満たした場合:
       ・lastClapTime = now に更新
-      ・拍手検出成功として手順4へ進む
+      ・拍手検出成功としてカウント処理（手順5）へ進む
   - 条件を満たさない場合:
-      ・clapCount は変更せず、そのまま手順6へ進む
+      ・clapCount は変更せず、そのまま手順7へ進む
 
-4. 拍手回数をカウントする
+5. 拍手回数をカウントする
   - clapCount == 0 のとき firstClapTime = now を記録する
   - clapCount を +1 する
 
-5. 拍手ウィンドウ終了後に回数を確定する
+6. 拍手ウィンドウ終了後に回数を確定する
   - clapCount > 0 かつ (now - firstClapTime) >= clapWindowMs の場合:
 
     - clapCount == 2 のとき:
@@ -195,13 +206,17 @@
         ・sound = (sound + 1) % musicCount
         ・noteIndex = 0 に戻す
         ・playing = true にする
+    
+    - それ以外の回数（1回, 4回以上）のとき:
+        ・何も処理を行わない（無視する）
+
 
     - 判定後:
         ・lastTriggerTime = now に更新
         ・clapCount = 0 にリセット
         ・firstClapTime = 0 にリセット
 
-6. 音楽再生処理を実行する
+7. 音楽再生処理を実行する
   - playing == true のときのみ再生処理を実行する
   - (now - lastNoteTime) で音の切り替えタイミングを判定する
   - 切り替えタイミングになった場合:
@@ -212,7 +227,7 @@
   - playing == false のとき:
       ・noTone(PIN_BUZZER) を維持する
 
-7. 次ループ用に前回値を保存する
+8. 次ループ用に前回値を保存する
   - lastSound = sensor を保存する
 ```
 
@@ -241,6 +256,7 @@ isInputBlocked(now):
 
 updateClap(diff, now):
   しきい値と最小間隔を満たす場合のみ拍手として検出し、カウントを更新する。
+  戻り値: void
 
 processClap(now):
   一定時間後に拍手回数を確定し、再生・停止・曲変更を実行する。
@@ -253,6 +269,29 @@ changeMusic():
 
 playMusic(now):
   再生中の場合のみ、時間に応じて音を更新しブザーで再生する。
+
+【処理の流れ】
+1. playing を確認する
+  - false の場合：
+    ・noTone(PIN_BUZZER) を実行する
+    ・処理終了
+
+2. 音の更新タイミングを確認する
+  - (now - lastNoteTime) < 音符間隔 の場合：
+    ・何もしない
+    ・処理終了
+
+3. 音を再生する
+  - tone(PIN_BUZZER, 現在の音) を実行する
+
+4. noteIndex を +1 する
+
+5. 曲の終端チェック
+  - noteIndex >= notesLength[sound] の場合：
+    ・noteIndex = 0 に戻す
+
+6. 時刻更新
+  - lastNoteTime = now
 ```
 
 **basic_design.md 2-2 との対応：** （基本設計書の関数一覧の説明を転記）
@@ -264,14 +303,12 @@ playMusic(now):
 | — | （共通）センサー読出 | `readSensor()` | センサー値を取得して sensorValue を更新 | なし | int (cm) | loop()内 |
 | — | （共通）出力更新 | `updateOutput()` | 現在の state に応じて LED/ブザーを制御 | int state | なし | loop()内 |
 | F1 | センサ読み取り | readSensor | サウンドセンサの値を取得してsensorに格納 | なし | int | loop |
-| F2 | 拍手検出 | detectClap | sensorとlastSoundの差から拍手を検出 | sensor | bool | loop |
-| F3 | 拍手カウント管理 | updateClap | clapCountとfirstClapTimeを更新 | 検出結果 | なし | loop |
-| F4 | 拍手判定 | processClap | 2回・3回判定して処理を決定 | なし | なし | loop |
-| F5 | 再生状態切替 | togglePlaying | playingのON/OFF切替 | なし | なし | F4内 |
-| F6 | 曲変更 | changeMusic | sound（曲番号）を変更しnoteIndexをリセット | なし | なし | F4内 |
-| F7 | 音楽再生 | playMusic | playingがtrueなら音を再生 | なし | なし | loop |
-| F8 | 音更新 | updateNote | noteIndexとlastNoteTimeで次の音へ進む | なし | なし | F7内 |
-| F9 | 入力無効判定 |isInputBlocked | lastTriggerTimeから1秒以内か確認 | なし | bool | loop |
+| F2 | 拍手カウント管理 | updateClap | clapCountとfirstClapTimeを更新 | 検出結果 | なし | loop |
+| F3 | 拍手判定 | processClap | 2回・3回判定して処理を決定 | なし | なし | loop |
+| F4 | 再生状態切替 | togglePlaying | playingのON/OFF切替 | なし | なし | F4内 |
+| F5 | 曲変更 | changeMusic | sound（曲番号）を変更しnoteIndexをリセット | なし | なし | F4内 |
+| F6 | 音楽再生 | playMusic | playingがtrueなら音を再生 | なし | なし | loop |
+| F7 | 入力無効判定 |isInputBlocked | lastTriggerTimeから1秒以内か確認 | なし | bool | loop |
 
 **引数：** `引数名`（型）: 何の値か
 
@@ -317,7 +354,7 @@ isInputBlocked(now):
 　戻り値：bool（入力無効ならtrue）
 
 updateClap(diff, now):
-　戻り値：bool（拍手が検出されたらtrue）
+　戻り値：void
 
 processClap(now):
 　戻り値：void
@@ -485,7 +522,7 @@ playMusic(now):
 | UT-I08 | updateClap | 50ms以内に2回入力する | 2回目は無視される（clapCount増えない） |  |  |
 | UT-I09 | updateClap | 50ms以上間隔を空けて入力 | 拍手として2回カウントされる |  |  |
 | UT-I10 | updateClap | 異常値（0や1023など極端な値） | 拍手として扱われない |  |  |
-| UT-I11 | loop（入力無効時） | 入力無効時間中に拍手を行う | 拍手がカウントされない |  |  |
+| UT-I11 | loop（入力無効時） | 入力無効時間中に拍手を行う | clapCount は増加するが、処理は実行されない |  |  |
 | UT-I12 | loop（前回値更新） | 入力無効中にセンサ変化がある | lastSound が更新される |  |  |
 | UT-I13 | updateClap | diff == clapThreshold の入力 | 拍手として検出される（clapCount+1） |  |  |
 | UT-I14 | updateClap | ちょうど50ms間隔で2回入力する | 2回目が有効としてカウントされる |  |  |
@@ -532,7 +569,7 @@ playMusic(now):
 | UT-T14 | loop（長時間動作） | 長時間連続動作させる | 誤動作なく安定して再生・検出される |  |  |
 | UT-T15 | loop（入力無効境界） | now - lastTriggerTime == inputBlockMs で拍手 | 入力有効として判定処理が再開される |  |  |
 | UT-T16 | loop（無効解除直後） | 入力無効終了直後の最初の拍手 | 1回目の拍手として正しくカウントされる |  |  |
-| UT-T17 | loop（無効中の3回拍手） | 入力無効時間中に3回拍手 | 曲変更されず、clapCount がリセットされる |  |  |
+| UT-T17 | loop（無効中の3回拍手） | 入力無効時間中に3回拍手 | 曲変更されず、clapCount / firstClapTime は保持される |  |  |
 ---
 
 ## 6. AIレビュー記録
