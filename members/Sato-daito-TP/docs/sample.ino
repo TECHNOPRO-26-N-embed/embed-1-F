@@ -1,3 +1,26 @@
+//#include <Arduino.h>
+
+#if defined(ARDUINO) || __has_include(<Arduino.h>)
+#include <Arduino.h>
+#else
+#define INPUT 0x0
+#define OUTPUT 0x1
+#define INPUT_PULLUP 0x2
+#define LOW 0x0
+#define HIGH 0x1
+#define A0 14
+inline void pinMode(int, int) {}
+inline void digitalWrite(int, int) {}
+inline int digitalRead(int) { return LOW; }
+inline int analogRead(int) { return 0; }
+inline void delay(unsigned long) {}
+inline unsigned long millis() { return 0; }
+struct SerialMock {
+  void begin(long) {}
+  void println(int) {}
+};
+static SerialMock Serial;
+#endif
 // ===== ピン定義 =====
 const int PIN_BUTTON    = 4;
 const int PIN_MODE      = 5;
@@ -70,18 +93,35 @@ void loop() {
     return;
   }
 
-  switch (currentState) {
+ switch (currentState) {
 
-    case STATE_WAIT:
-      blinkLED(PIN_LED_BLUE, now, 500);
+  case STATE_WAIT:
+    allOff();
+    blinkLED(PIN_LED_BLUE, now, 500);
+    break;
 
-      if (sensorValue > 200) {
-        currentState = STATE_MEASURE;
-      }
-      break;
+  case STATE_MEASURE:
+    allOff();
+    digitalWrite(PIN_LED_BLUE, HIGH); // 測定中は青点灯
+    break;
 
-    case STATE_MEASURE:
-  holdMaxValue();
+  case STATE_NORMAL:
+    allOff();
+    digitalWrite(PIN_LED_GREEN, HIGH); // 通常は緑
+    break;
+
+  case STATE_ALERT:
+    allOff();
+    blinkLED(PIN_LED_RED, now, 200); // 警告は赤点滅（速い）
+    break;
+
+  case STATE_WEAK:
+    allOff();
+    digitalWrite(PIN_LED_RED, HIGH);
+    digitalWrite(PIN_LED_GREEN, HIGH); // 赤＋緑＝黄色風
+    break;
+}
+
 
   if (digitalSoundValue == HIGH) {
     currentState = STATE_ALERT;   // 大きい音を即検出
@@ -95,8 +135,8 @@ void loop() {
   else {
     currentState = STATE_WEAK;
   }
-  break;
-  }
+ // break;
+  
 
   // デバッグ表示
   Serial.println(sensorValue);
