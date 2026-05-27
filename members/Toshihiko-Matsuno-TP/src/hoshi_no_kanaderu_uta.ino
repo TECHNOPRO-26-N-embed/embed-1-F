@@ -41,9 +41,72 @@ unsigned long lastLedButtonTime = 0;
 unsigned long stopEnteredAt = 0;
 const unsigned long STOP_HOLD_MS = 300;
 
-// --- 星の奏でる歌（簡易メロディ） ---
-int melody[] = {262, 294, 330, 349, 392, 440, 494, 523};
-int noteDurations[] = {4, 4, 4, 4, 4, 4, 4, 4};
+// --- 星の奏でる歌（詳細設計 8-1 準拠） ---
+const int TEMPO = 75;
+const float BEAT_MS = 60000.0 / TEMPO;
+
+#define F_SHARP4 370
+#define G_SHARP4 415
+#define A_SHARP4 466
+#define B4 494
+#define C_SHARP5 554
+#define D_SHARP5 622
+#define F_SHARP5 740
+#define E5 659
+#define F5 698
+#define G5 784
+#define G_SHARP5 831
+
+int melody[] = {
+  A_SHARP4, A_SHARP4, B4, C_SHARP5, C_SHARP5, B4, A_SHARP4, G_SHARP4,
+  A_SHARP4, B4, C_SHARP5, D_SHARP5, C_SHARP5, B4, A_SHARP4, 0,
+
+  C_SHARP5, D_SHARP5, F_SHARP5, E5, D_SHARP5, C_SHARP5, A_SHARP4, 0,
+  A_SHARP4, B4, C_SHARP5, D_SHARP5, C_SHARP5, A_SHARP4, G_SHARP4, 0,
+
+  A_SHARP4, C_SHARP5, D_SHARP5, C_SHARP5, A_SHARP4, 0,
+  0, 0,
+
+  D_SHARP5, C_SHARP5, B4, A_SHARP4, G_SHARP4, A_SHARP4, B4, C_SHARP5,
+  D_SHARP5, F5, G5, F5, D_SHARP5, C_SHARP5, A_SHARP4, 0,
+
+  C_SHARP5, D_SHARP5, F5, E5, D_SHARP5, C_SHARP5, A_SHARP4, 0,
+  A_SHARP4, B4, C_SHARP5, D_SHARP5, C_SHARP5, B4, A_SHARP4, G_SHARP4,
+
+  C_SHARP5, D_SHARP5, F5, G_SHARP5, F5, D_SHARP5, C_SHARP5, 0,
+  D_SHARP5, F5, G5, F5, D_SHARP5, C_SHARP5, A_SHARP4, 0,
+
+  C_SHARP5, D_SHARP5, F5, E5, D_SHARP5, C_SHARP5, A_SHARP4, 0,
+  A_SHARP4, C_SHARP5, D_SHARP5, C_SHARP5, A_SHARP4, G_SHARP4, F_SHARP4, 0,
+
+  F_SHARP5
+};
+
+float duration[] = {
+  0.5, 0.5, 1, 1, 0.5, 0.5, 1, 1,
+  0.5, 0.5, 1, 1, 0.5, 0.5, 2, 2,
+
+  0.5, 0.5, 1, 1, 0.5, 0.5, 2, 2,
+  0.5, 0.5, 1, 1, 0.5, 1, 2, 2,
+
+  1, 1, 1, 1, 2, 2,
+  2, 2,
+
+  0.5, 0.5, 1, 1, 0.5, 0.5, 1, 1,
+  0.5, 0.5, 1, 1, 0.5, 0.5, 2, 2,
+
+  0.5, 0.5, 1, 1, 0.5, 0.5, 2, 2,
+  0.5, 0.5, 1, 1, 0.5, 0.5, 1, 1,
+
+  0.5, 0.5, 1, 1, 0.5, 0.5, 2, 2,
+  0.5, 0.5, 1, 1, 0.5, 0.5, 2, 2,
+
+  0.5, 0.5, 1, 1, 0.5, 0.5, 2, 2,
+  1, 1, 1, 1, 1, 1, 2, 2,
+
+  6
+};
+
 const int melodyLength = sizeof(melody) / sizeof(melody[0]);
 
 // --- 再生制御 ---
@@ -116,26 +179,32 @@ void updateMusic() {
     return;
   }
 
-  int noteDuration = 1000 / noteDurations[currentNoteIndex];
-  int toneDuration = (noteDuration * 9) / 10;
+  unsigned long noteDuration = (unsigned long)(BEAT_MS * duration[currentNoteIndex]);
+  unsigned long toneDuration = (noteDuration * 9UL) / 10UL;
+  int noteFreq = melody[currentNoteIndex];
   unsigned long elapsed = millis() - noteStartAt;
 
   // 音を鳴らす区間だけLED点灯し、拍の隙間は消灯
   if (!noteToneOn) {
-    tone(PIN_BUZZER, melody[currentNoteIndex]);
-    if (enableLight) {
-      controlMainLed(true);
+    if (noteFreq > 0) {
+      tone(PIN_BUZZER, noteFreq);
+      if (enableLight) {
+        controlMainLed(true);
+      }
+    } else {
+      noTone(PIN_BUZZER);
+      controlMainLed(false);
     }
     noteToneOn = true;
   }
 
-  if (noteToneOn && elapsed >= (unsigned long)toneDuration) {
+  if (noteToneOn && elapsed >= toneDuration) {
     noTone(PIN_BUZZER);
     controlMainLed(false);
     noteToneOn = false;
   }
 
-  if (elapsed >= (unsigned long)noteDuration) {
+  if (elapsed >= noteDuration) {
     currentNoteIndex++;
     noteStartAt = millis();
     noteToneOn = false;
