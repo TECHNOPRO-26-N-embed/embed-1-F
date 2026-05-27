@@ -460,6 +460,48 @@ void processSerialTestCommand(){
       } else {
         Serial.println(millis() - overTempStartMillis);
       }
+    } else if (cmd == 'Y' || cmd == 'y') {
+      // --- No.9 競合時の優先順位テスト ---
+      // 動作中(currentState=1)で「ボタン押下」と「自動停止条件成立」を同一周回で発生させる
+      // 期待動作: handleStop()（手動停止）が優先され、state=2 へ遷移
+      unsigned long nowCmd = millis();
+      // 強制的に動作中状態にセット
+      currentState = 1;
+      controlFan();
+      // テスト用: 温度は停止条件成立状態、無音60秒経過状態を両方セット
+      tempTestMode = true;
+      tempTestInjectedC = 26.0; // 停止条件成立
+      soundTestMode = true;
+      soundTestForcedDetected = false;
+      tempStopConditionMet = true;
+      soundTimeoutStopConditionMet = true;
+      // ボタン押下イベントを同時に発生させる
+      buttonPressEvent = true;
+      // --- loop()の状態遷移分岐を模擬実行 ---
+      // 本来はloop()で分岐するが、ここで明示的に分岐を再現
+      // 1. ボタン押下優先: handleStop()が呼ばれstate=2になるはず
+      if(currentState == 1){
+        if(buttonPressEvent == true){
+          handleStop();
+          Serial.println("[TEST9] handleStop()優先: state=2へ遷移");
+        }else if(tempStopConditionMet == true || soundTimeoutStopConditionMet == true){
+          currentState = 0;
+          controlFan();
+          Serial.println("[TEST9] 自動停止優先: state=0へ遷移");
+        }
+      }
+      // 結果出力
+      Serial.print("[TEST9] currentState=");
+      Serial.println(currentState);
+      Serial.print("[TEST9] (2=手動停止優先, 0=自動停止優先)\n");
+      // テスト後はフラグをリセット
+      buttonPressEvent = false;
+      tempTestMode = false;
+      soundTestMode = false;
+      tempStopConditionMet = false;
+      soundTimeoutStopConditionMet = false;
+      tempTestInjectedC = 0.0;
+      Serial.println("[TEST9] テスト完了");
     }
   }
 }
