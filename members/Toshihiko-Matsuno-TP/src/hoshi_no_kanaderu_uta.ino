@@ -1,20 +1,20 @@
 // 星の奏でる歌 単体再生組込みシステム
-// Arduino UNO R3 用
-// 必要部品: サウンドセンサ, パッシブブザー, LED, ボタンx4, ファン, 状態表示LEDx3
-// 設計: V字モデル・非ブロッキング(millis)・安全停止・チャタリング対策
+// Arduino UNO R3 用（ファン機能は仕様から除外）
+// 必要部品: サウンドセンサ, パッシブブザー, メインLED, ボタンx3, 状態表示LEDx2
 
 // --- ピン定義 ---
-const int PIN_SOUND = 2;      // サウンドセンサ
-const int PIN_BUZZER = 3;     // パッシブブザー
-const int PIN_LED = 4;        // メインLED
-const int PIN_BUTTON_STOP = 5;  // 強制停止ボタン
-const int PIN_FAN = 6;        // ファン
-const int PIN_BUTTON_MUSIC = 7;  // 音楽ON/OFF切替
-const int PIN_BUTTON_FAN = 8;    // ファンON/OFF切替
-const int PIN_BUTTON_LED = 9;    // LED ON/OFF切替
-const int PIN_LED_MUSIC_STATUS = 10; // 音楽状態表示LED
-const int PIN_LED_FAN_STATUS = 11;   // ファン状態表示LED
-const int PIN_LED_LIGHT_STATUS = 12; // LED状態表示LED
+const int PIN_SOUND = A0;               // サウンドセンサ AO
+const int PIN_BUZZER = 3;               // パッシブブザー
+const int PIN_LED_MAIN = 4;             // メインLED
+const int PIN_BUTTON_STOP = 5;          // 強制停止ボタン
+const int PIN_BUTTON_MUSIC = 7;         // 音楽ON/OFF切替ボタン
+const int PIN_BUTTON_LED = 9;           // LED ON/OFF切替ボタン
+const int PIN_LED_MUSIC_STATUS = 10;    // 音楽有効状態LED
+const int PIN_LED_LIGHT_STATUS = 12;    // LED有効状態LED
+
+// --- しきい値設定 ---
+const int SOUND_THRESHOLD_ON = 100;      // 音量がこの値以上でトリガー
+const int SOUND_THRESHOLD_OFF = 95;      // 復帰用ヒステリシス
 
 // --- 状態定義 ---
 enum State {
@@ -22,36 +22,37 @@ enum State {
   PLAY_MUSIC,
   STOP_ALL
 };
+
 State state = WAIT_SOUND;
 
-// --- タイマー・フラグ ---
-unsigned long musicStartTime = 0;
-const unsigned long MUSIC_DURATION = 15000; // 曲の長さ[ms]（例:15秒）
-bool isMusicPlaying = false;
-bool isFanOn = false;
-bool isLedOn = false;
+// --- 各種フラグ ---
 bool enableMusic = true;
-bool enableFan = true;
 bool enableLight = true;
+bool isMusicPlaying = false;
+bool isMainLedOn = false;
 
 // --- チャタリング対策 ---
 const unsigned long DEBOUNCE_MS = 50;
 unsigned long lastStopButtonTime = 0;
 unsigned long lastMusicButtonTime = 0;
-unsigned long lastFanButtonTime = 0;
 unsigned long lastLedButtonTime = 0;
 
-// --- 星の奏でる歌（メロディ配列） ---
-// 例: ドレミファソラシド（実際は星の奏でる歌の音階に合わせて修正）
+// --- 再トリガー制御 ---
+unsigned long stopEnteredAt = 0;
+const unsigned long STOP_HOLD_MS = 300;
+
+// --- 星の奏でる歌（簡易メロディ） ---
 int melody[] = {262, 294, 330, 349, 392, 440, 494, 523};
 int noteDurations[] = {4, 4, 4, 4, 4, 4, 4, 4};
 const int melodyLength = sizeof(melody) / sizeof(melody[0]);
 
-const int SENSOR_THRESHOLD = 100; // センサモジュールのしきい値設定（例: 100)
+// --- 再生制御 ---
+int currentNoteIndex = 0;
+unsigned long noteStartAt = 0;
+bool noteToneOn = false;
 
 void updateStatusLeds() {
   digitalWrite(PIN_LED_MUSIC_STATUS, enableMusic ? HIGH : LOW);
-  digitalWrite(PIN_LED_FAN_STATUS, enableFan ? HIGH : LOW);
   digitalWrite(PIN_LED_LIGHT_STATUS, enableLight ? HIGH : LOW);
 }
 
@@ -63,133 +64,130 @@ bool readToggleButton(int pin, unsigned long &lastTime) {
   return false;
 }
 
+void controlMainLed(bool on) {
+  digitalWrite(PIN_LED_MAIN, on ? HIGH : LOW);
+  isMainLedOn = on;
+}
+
+void startMusic() {
+  isMusicPlaying = true;
+  currentNoteIndex = 0;
+  noteStartAt = millis();
+  noteToneOn = false;
+}
+
+void stopOutputs() {
+  noTone(PIN_BUZZER);
+  controlMainLed(false);
+  isMusicPlaying = false;
+}
+
+void stopAll() {
+  stopOutputs();
+  state = STOP_ALL;
+  stopEnteredAt = millis();
+}
+
 void handleToggleButtons() {
   if (readToggleButton(PIN_BUTTON_MUSIC, lastMusicButtonTime)) {
     enableMusic = !enableMusic;
-    if (!enableMusic) {
-      noTone(PIN_BUZZER);
-      isMusicPlaying = false;
-    } else if (state == PLAY_MUSIC) {
-      isMusicPlaying = true;
-      playMusic();
-    }
-  }
-
-  if (readToggleButton(PIN_BUTTON_FAN, lastFanButtonTime)) {
-    enableFan = !enableFan;
-    if (state == PLAY_MUSIC) {
-      controlFan(enableFan);
-    } else {
-      controlFan(false);
+    if (!enableMusic && state == PLAY_MUSIC) {
+      stopAll();
     }
   }
 
   if (readToggleButton(PIN_BUTTON_LED, lastLedButtonTime)) {
     enableLight = !enableLight;
-    if (state == PLAY_MUSIC) {
-      controlLed(enableLight);
-    } else {
-      controlLed(false);
+    if (!enableLight) {
+      controlMainLed(false);
     }
   }
 
   updateStatusLeds();
 }
 
+void updateMusic() {
+  if (!isMusicPlaying || !enableMusic) {
+    return;
+  }
+
+  if (currentNoteIndex >= melodyLength) {
+    stopAll();
+    return;
+  }
+
+  int noteDuration = 1000 / noteDurations[currentNoteIndex];
+  int toneDuration = (noteDuration * 9) / 10;
+  unsigned long elapsed = millis() - noteStartAt;
+
+  // 音を鳴らす区間だけLED点灯し、拍の隙間は消灯
+  if (!noteToneOn) {
+    tone(PIN_BUZZER, melody[currentNoteIndex]);
+    if (enableLight) {
+      controlMainLed(true);
+    }
+    noteToneOn = true;
+  }
+
+  if (noteToneOn && elapsed >= (unsigned long)toneDuration) {
+    noTone(PIN_BUZZER);
+    controlMainLed(false);
+    noteToneOn = false;
+  }
+
+  if (elapsed >= (unsigned long)noteDuration) {
+    currentNoteIndex++;
+    noteStartAt = millis();
+    noteToneOn = false;
+  }
+}
+
 void setup() {
   pinMode(PIN_SOUND, INPUT);
   pinMode(PIN_BUZZER, OUTPUT);
-  pinMode(PIN_LED, OUTPUT);
+  pinMode(PIN_LED_MAIN, OUTPUT);
   pinMode(PIN_BUTTON_STOP, INPUT_PULLUP);
-  pinMode(PIN_FAN, OUTPUT);
   pinMode(PIN_BUTTON_MUSIC, INPUT_PULLUP);
-  pinMode(PIN_BUTTON_FAN, INPUT_PULLUP);
   pinMode(PIN_BUTTON_LED, INPUT_PULLUP);
   pinMode(PIN_LED_MUSIC_STATUS, OUTPUT);
-  pinMode(PIN_LED_FAN_STATUS, OUTPUT);
   pinMode(PIN_LED_LIGHT_STATUS, OUTPUT);
 
-  controlFan(false);
-  controlLed(false);
+  stopOutputs();
   updateStatusLeds();
 }
 
 void loop() {
   handleToggleButtons();
 
+  // 強制停止は全状態で最優先
+  if (readToggleButton(PIN_BUTTON_STOP, lastStopButtonTime)) {
+    stopAll();
+  }
+
+  int soundValue = analogRead(PIN_SOUND);
+
   switch (state) {
     case WAIT_SOUND:
-      if (digitalRead(PIN_SOUND) == HIGH) { // センサモジュールのDO端子がHIGHになる
-        state = PLAY_MUSIC;
-        musicStartTime = millis();
+      if (soundValue >= SOUND_THRESHOLD_ON) {
         if (enableMusic) {
-          isMusicPlaying = true;
-          playMusic();
+          startMusic();
+          state = PLAY_MUSIC;
+        } else {
+          // 音楽無効時は誤連続トリガー防止のため一度停止状態へ
+          stopAll();
         }
-        controlFan(enableFan);
-        controlLed(enableLight);
       }
       break;
+
     case PLAY_MUSIC:
-      if (isMusicPlaying && enableMusic) {
-        playMusic();
-      } else {
-        noTone(PIN_BUZZER);
-      }
-      if (digitalRead(PIN_BUTTON_STOP) == LOW && millis() - lastStopButtonTime > DEBOUNCE_MS) {
-        lastStopButtonTime = millis();
-        stopAll();
-      }
-      if (millis() - musicStartTime > MUSIC_DURATION) {
-        stopAll();
-      }
+      updateMusic();
       break;
+
     case STOP_ALL:
-      // 停止状態から復帰
-      if (digitalRead(PIN_SOUND) == HIGH) {
+      // 最低保持時間を過ぎ、音が十分下がったら待機へ戻す
+      if (millis() - stopEnteredAt >= STOP_HOLD_MS && soundValue <= SOUND_THRESHOLD_OFF) {
         state = WAIT_SOUND;
       }
       break;
   }
-}
-
-void playMusic() {
-  if (!enableMusic) {
-    noTone(PIN_BUZZER);
-    isMusicPlaying = false;
-    return;
-  }
-
-  unsigned long elapsed = millis() - musicStartTime;
-  int totalDuration = 0;
-  for (int i = 0; i < melodyLength; i++) {
-    int noteDuration = 1000 / noteDurations[i];
-    totalDuration += noteDuration;
-    if (elapsed < totalDuration) {
-      tone(PIN_BUZZER, melody[i], noteDuration * 0.9);
-      break;
-    }
-  }
-  if (elapsed > MUSIC_DURATION) {
-    noTone(PIN_BUZZER);
-    isMusicPlaying = false;
-  }
-}
-
-void controlFan(bool on) {
-  digitalWrite(PIN_FAN, on ? HIGH : LOW);
-  isFanOn = on;
-}
-
-void controlLed(bool on) {
-  digitalWrite(PIN_LED, on ? HIGH : LOW);
-  isLedOn = on;
-}
-
-void stopAll() {
-  noTone(PIN_BUZZER);
-  controlFan(false);
-  controlLed(false);
-  isMusicPlaying = false;
-  state = STOP_ALL;
 }
