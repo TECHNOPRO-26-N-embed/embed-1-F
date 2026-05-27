@@ -34,8 +34,8 @@ unsigned long lastDebounceTime = 0;     // 前回の判定時刻（ms）
 // =============================================
 // カウンター・フラグ
 // =============================================
-float motorOnTempC   = 24.0;//28.0;     // モーターON温度しきい値
-float motorOffTempC  = 18.0;//26.0;     // モーターOFF温度しきい値
+float motorOnTempC   = 28.0;     // モーターON温度しきい値
+float motorOffTempC  = 26.0;     // モーターOFF温度しきい値
 unsigned long overTempRequiredMs = 5000; // モーター起動に必要な継続時間（ms）
 unsigned long sensorReadIntervalMs = 100; // センサー読取り周期（ms）
 bool abnormalLogFlag = false;    // 異常値検出フラグ
@@ -43,6 +43,14 @@ char abnormalLogBuffer[64] = ""; // 異常値内容バッファ
 bool tempStartConditionMet = false;       // 温度起動条件成立フラグ（judgeTemperatureで更新）
 bool tempStopConditionMet = false;        // 温度停止条件成立フラグ（judgeTemperatureで更新）
 bool soundTimeoutStopConditionMet = false; // 無音60秒停止条件成立フラグ（judgeSoundで更新）
+
+// 温度判定テスト用（main_errorlog_test.ino限定）
+bool tempTestMode = false;
+float tempTestInjectedC = 0.0;
+bool tempStopBoundaryTestMode = false;
+bool soundTestMode = false;
+bool soundTestForcedDetected = false;
+bool soundBoundaryWindowTestMode = false;
 
 #define SOUND_THRESHOLD 193
 
@@ -80,6 +88,10 @@ bool readButton(unsigned long now){
 //  — サウンドセンサー値を取得し音検知結果を更新する
 bool detectSound(){
   if(currentState==0 || currentState==1){
+    if (soundTestMode == true) {
+      soundDetected = soundTestForcedDetected;
+      return soundDetected;
+    }
     int nowSound = analogRead(pinSoundSensor);
     if(nowSound>=0 && nowSound<=1023){
       for (int i = 4; i > 0; i--) {
@@ -155,6 +167,9 @@ void judgeSound(unsigned long now){
 float readTemperature(){
   if(currentState==0 || currentState==1){
     float nowTemperature = dht.readTemperature();
+    if (tempTestMode == true) {
+      nowTemperature = tempTestInjectedC;
+    }
     Serial.print("T = ");
     Serial.println(temperatureC);
     Serial.print("\n");
@@ -294,6 +309,161 @@ void logAbnormalValues(){
   abnormalLogBuffer[0] = '\0';
 }
 
+// — シリアルコマンドでログ機構の動作確認を行う（Eで擬似エラー発生）
+void processSerialTestCommand(){
+  while (Serial.available() > 0) {
+    char cmd = (char)Serial.read();
+    if (cmd == 'E' || cmd == 'e') {
+      abnormalLogFlag = true;
+      snprintf(abnormalLogBuffer, sizeof(abnormalLogBuffer), "Manual test error injected");
+    } else if (cmd == 'A' || cmd == 'a') {
+      tempTestMode = true;
+      tempTestInjectedC = 27.9;
+      Serial.println("TEMP TEST: Boundary A ON (27.9C)");
+    } else if (cmd == 'B' || cmd == 'b') {
+      tempTestMode = true;
+      tempTestInjectedC = 28.0;
+      Serial.println("TEMP TEST: Boundary B ON (28.0C)");
+    } else if (cmd == 'C' || cmd == 'c') {
+      tempTestMode = true;
+      tempTestInjectedC = 28.1;
+      Serial.println("TEMP TEST: Boundary C ON (28.1C)");
+    } else if (cmd == 'H' || cmd == 'h') {
+      tempTestMode = true;
+      tempTestInjectedC = 28.5;
+      Serial.println("TEMP TEST: High temperature mode ON (28.5C)");
+    } else if (cmd == 'U' || cmd == 'u') {
+      tempTestMode = true;
+      tempTestInjectedC = 26.1;
+      Serial.println("TEMP TEST: Stop boundary U ON (26.1C)");
+    } else if (cmd == 'I' || cmd == 'i') {
+      tempTestMode = true;
+      tempTestInjectedC = 26.0;
+      Serial.println("TEMP TEST: Stop boundary I ON (26.0C)");
+    } else if (cmd == 'O' || cmd == 'o') {
+      tempTestMode = true;
+      tempTestInjectedC = 25.9;
+      Serial.println("TEMP TEST: Stop boundary O ON (25.9C)");
+    } else if (cmd == 'L' || cmd == 'l') {
+      tempTestMode = true;
+      tempTestInjectedC = 25.5;
+      Serial.println("TEMP TEST: Low temperature mode ON (25.5C)");
+    } else if (cmd == 'V' || cmd == 'v') {
+      unsigned long nowCmd = millis();
+      currentState = 1;
+      controlFan();
+      tempStopBoundaryTestMode = false;
+      soundBoundaryWindowTestMode = true;
+      tempTestMode = true;
+      tempTestInjectedC = 26.1;
+      soundTestMode = true;
+      soundTestForcedDetected = false;
+      tempStopConditionMet = false;
+      soundTimeoutStopConditionMet = false;
+      soundStartMillis = nowCmd - 59999;
+      judgeSound(nowCmd);
+      Serial.println("SOUND TEST: Silence boundary V set (59999ms)");
+    } else if (cmd == 'W' || cmd == 'w') {
+      unsigned long nowCmd = millis();
+      currentState = 1;
+      controlFan();
+      tempStopBoundaryTestMode = false;
+      soundBoundaryWindowTestMode = false;
+      tempTestMode = true;
+      tempTestInjectedC = 26.1;
+      soundTestMode = true;
+      soundTestForcedDetected = false;
+      tempStopConditionMet = false;
+      soundTimeoutStopConditionMet = false;
+      soundStartMillis = nowCmd - 60000;
+      judgeSound(nowCmd);
+      if (soundTimeoutStopConditionMet == true) {
+        currentState = 0;
+        controlFan();
+      }
+      Serial.println("SOUND TEST: Silence boundary W set (60000ms)");
+    } else if (cmd == 'X' || cmd == 'x') {
+      unsigned long nowCmd = millis();
+      currentState = 1;
+      controlFan();
+      tempStopBoundaryTestMode = false;
+      soundBoundaryWindowTestMode = false;
+      tempTestMode = true;
+      tempTestInjectedC = 26.1;
+      soundTestMode = true;
+      soundTestForcedDetected = false;
+      tempStopConditionMet = false;
+      soundTimeoutStopConditionMet = false;
+      soundStartMillis = nowCmd - 60001;
+      judgeSound(nowCmd);
+      if (soundTimeoutStopConditionMet == true) {
+        currentState = 0;
+        controlFan();
+      }
+      Serial.println("SOUND TEST: Silence boundary X set (60001ms)");
+    } else if (cmd == 'M' || cmd == 'm') {
+      tempStopBoundaryTestMode = true;
+      soundBoundaryWindowTestMode = false;
+      tempTestMode = true;
+      tempTestInjectedC = 26.1;
+      currentState = 1;
+      soundStartMillis = 0;
+      soundTestMode = false;
+      soundTimeoutStopConditionMet = false;
+      tempStopConditionMet = false;
+      controlFan();
+      Serial.println("TEMP TEST: Forced running state (currentState=1, T=26.1C, ignore sound-timeout stop)");
+    } else if (cmd == 'N' || cmd == 'n') {
+      tempTestMode = false;
+      tempStopBoundaryTestMode = false;
+      soundTestMode = false;
+      soundBoundaryWindowTestMode = false;
+      Serial.println("TEMP TEST: OFF (real DHT11 input)");
+    } else if (cmd == 'R' || cmd == 'r') {
+      overTempStartMillis = 0;
+      tempStartConditionMet = false;
+      tempStopConditionMet = false;
+      soundTimeoutStopConditionMet = false;
+      Serial.println("TEMP TEST: judgeTemperature flags reset");
+    } else if (cmd == 'P' || cmd == 'p') {
+      Serial.print("TEMP TEST STATUS | T=");
+      Serial.print(temperatureC);
+      Serial.print(" | currentState=");
+      Serial.print(currentState);
+      Serial.print(" | soundDetected=");
+      Serial.print(soundDetected ? 1 : 0);
+      Serial.print(" | onTh=");
+      Serial.print(motorOnTempC);
+      Serial.print(" | offTh=");
+      Serial.print(motorOffTempC);
+      Serial.print(" | tempStartConditionMet=");
+      Serial.print(tempStartConditionMet ? 1 : 0);
+      Serial.print(" | tempStopConditionMet=");
+      Serial.print(tempStopConditionMet ? 1 : 0);
+      Serial.print(" | soundTimeoutStopConditionMet=");
+      Serial.print(soundTimeoutStopConditionMet ? 1 : 0);
+      Serial.print(" | soundTestMode=");
+      Serial.print(soundTestMode ? 1 : 0);
+      Serial.print(" | soundBoundaryWindowTestMode=");
+      Serial.print(soundBoundaryWindowTestMode ? 1 : 0);
+      Serial.print(" | tempStopBoundaryTestMode=");
+      Serial.print(tempStopBoundaryTestMode ? 1 : 0);
+      Serial.print(" | silenceElapsedMs=");
+      if (soundStartMillis == 0) {
+        Serial.print(0);
+      } else {
+        Serial.print(millis() - soundStartMillis);
+      }
+      Serial.print(" | overTempElapsedMs=");
+      if (overTempStartMillis == 0) {
+        Serial.println(0);
+      } else {
+        Serial.println(millis() - overTempStartMillis);
+      }
+    }
+  }
+}
+
 // 【処理の流れ】
 // 1. abnormalLogFlag が true かどうか判定
 // 2. true の場合、abnormalLogBuffer の内容を Serial.println() でシリアル出力
@@ -326,6 +496,7 @@ void setup() {
 
 void loop() {
   unsigned long now = millis();
+  processSerialTestCommand();
   readButton(now);
   if((now - lastSensorReadMillis) >= sensorReadIntervalMs){
     detectSound();
@@ -348,8 +519,11 @@ void loop() {
     }
   }else if(currentState == 1){
     if(buttonPressEvent == true){handleStop(); return;}
-    if(tempStopConditionMet == true || soundTimeoutStopConditionMet == true){
+    if(tempStopConditionMet == true || (tempStopBoundaryTestMode == false && soundBoundaryWindowTestMode == false && soundTimeoutStopConditionMet == true)){
       currentState = 0;
+      if (tempStopConditionMet == true) {
+        tempStopBoundaryTestMode = false;
+      }
       controlFan();
       return;
     }

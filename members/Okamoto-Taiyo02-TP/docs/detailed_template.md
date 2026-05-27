@@ -761,10 +761,10 @@ currentState が 2（機能停止中）のとき：
 
 | No | テスト対象 | 入力・操作 | 期待する結果 | 実際の結果 | 合否 |
 |:---|:---|:---|:---|:---|:---|
-| 1 | `readButton(now)` | ボタンを1回押下して離す（50ms以上保持） | 押下瞬間の1回だけ `buttonPressEvent=true`、それ以外は `false` | | [ ] |
-| 2 | `detectSound()` | サウンドセンサーに音を入力し、閾値以上/未満を切替 | 閾値以上で `soundDetected=true`、未満で `false`。`soundValue` が移動平均で更新される | | [ ] |
-| 3 | `judgeTemperature(now)` | 温度を28℃以上で5秒維持 → 26℃以下に低下 | 5秒後に `tempStartConditionMet=true`、26℃以下で `tempStopConditionMet=true` | | [ ] |
-| 4 | `controlFan()` | `currentState` を 0/1/2 に切替 | state=1でモーターON、state=0または2でモーターOFF | | [ ] |
+| 1 | `readButton(now)` | ボタンを1回押下して離す（50ms以上保持） | 押下瞬間の1回だけ `buttonPressEvent=true`、それ以外は `false` | 押下瞬間の1回だけ `buttonPressEvent=true`、それ以外は `false`になった | [〇] |
+| 2 | `detectSound()` | サウンドセンサーに音を入力し、閾値以上/未満を切替 | 閾値以上で `soundDetected=true`、未満で `false`。`soundValue` が移動平均で更新される |`soundDetected=true`、未満で `false`。`soundValue` が移動平均で更新された| [〇] |
+| 3 | `judgeTemperature(now)` | 温度を28℃以上で5秒維持 → 26℃以下に低下 | 5秒後に `tempStartConditionMet=true`、26℃以下で `tempStopConditionMet=true` | 5秒後に `tempStartConditionMet=true`、26℃以下で `tempStopConditionMet=true`になった | [〇] |
+| 4 | `controlFan()` | `currentState` を 0/1/2 に切替 | state=1でモーターON、state=0または2でモーターOFF |〇| [ ] |
 
 ### 5-2. 機能テスト（必須機能ごと）
 
@@ -772,14 +772,15 @@ currentState が 2（機能停止中）のとき：
 
 | No | 必須機能（requirements.md から転記） | テスト手順 | 期待する結果 | 実際の結果 | 合否 |
 |:---|:---|:---|:---|:---|:---|
-| 1 | 音を検知できる（60秒間の間に40〜60dBを感知） | 音を入力し、`soundDetected` が true になることを確認。無音を60秒継続する | 音入力時に検知し、無音60秒継続で停止条件 `soundTimeoutStopConditionMet=true` になる | | [ ] |
-| 2 | 温湿度を検知できる | DHT11から温湿度を読み取り、シリアル表示または変数値を確認 | `temperatureC` と `humidityPct` が更新され、範囲内値を取得できる | | [ ] |
-| 3 | 温度（5秒間28℃以上）によって一定速度でファンを回せる | 28℃以上を5秒維持し、状態遷移を確認 | `tempStartConditionMet=true` 後に `currentState=1` となり、ファンが一定速度で回転 | | [ ] |
-| 4 | 手動（ボタン）でファンを止める（ON/OFF） | 動作中にボタンを1回押下し、その後再押下 | 1回目で `handleStop()` が呼ばれ機能停止（state=2）、2回目で待機（state=0）へ戻る | | [ ] |
-| 5 | 自動的（26℃以下）にファンを止める | 動作中に温度を26℃以下へ下げる | `tempStopConditionMet=true` となり、`currentState=0` に遷移してファン停止 | | [ ] |
-| 6 | 起動温度境界（28℃） | 温度を 27.9℃ / 28.0℃ / 28.1℃ に設定し、それぞれ5秒維持して比較 | 27.9℃では起動しない。28.0℃と28.1℃では5秒後に起動条件成立 | | [ ] |
-| 7 | 停止温度境界（26℃） | 動作中に温度を 26.1℃ / 26.0℃ / 25.9℃ に設定して比較 | 26.1℃では停止しない。26.0℃と25.9℃で停止条件成立 | | [ ] |
-| 8 | 無音時間境界（60秒） | 無音継続時間を 59999ms / 60000ms / 60001ms で比較 | 59999msでは停止しない。60000ms以上で停止条件成立 | | [ ] |
+| 1 | 音を検知できる（60秒間の間に音を感知） | 音を入力し、`soundDetected` が true になることを確認。無音を60秒継続する | 音入力時に検知し、無音60秒継続で停止条件 `soundTimeoutStopConditionMet=true` になる |音入力時に検知し、無音60秒継続で停止条件 `soundTimeoutStopConditionMet=true` になった| [〇] |
+| 2 | 温湿度を検知できる | DHT11から温湿度を読み取り、シリアル表示または変数値を確認 | `temperatureC` と `humidityPct` が更新され、範囲内値を取得できる |湿度は今回の機能に必要ないので値を取らない。`temperatureC` と が更新され、範囲内値を取得できた| [〇] |
+| 3 | 温度（5秒間28℃以上）かつ音検知でファンを一定速度で回せる | 温度を28℃以上で5秒維持して `tempStartConditionMet=true` を確認後、音を入力して `soundDetected=true` にし、`currentState` の遷移を確認する | `tempStartConditionMet=true` かつ `soundDetected=true` が成立した周回で `currentState=1` に遷移し、ファンが一定速度で回転する |条件通りの手順でファンが一定速度で旋回した| [〇] |
+| 4 | 手動（ボタン）でファンを止める（ON/OFF） | 動作中にボタンを1回押下し、その後再押下 | 1回目で `handleStop()` が呼ばれ機能停止（state=2）、2回目で待機（state=0）へ戻る |手順通りの操作で期待通りに動いた| [〇] |
+| 5 | 自動的（26℃以下）にファンを止める | 動作中に温度を26℃以下へ下げる | `tempStopConditionMet=true` となり、`currentState=0` に遷移してファン停止 | 期待通りにファンが停止することを確認した| [〇] |
+| 6 | 起動温度境界（28℃） | 温度を 27.9℃ / 28.0℃ / 28.1℃ に設定し、それぞれ5秒維持して比較 | 27.9℃では起動しない。28.0℃と28.1℃では5秒後に起動条件成立 | 27.9℃では5秒経過後も tempStartConditionMet=0 だった
+28.0℃と28.1℃では5秒経過後に tempStartConditionMet=1 になった| [〇] |
+| 7 | 停止温度境界（26℃） | `currentState=1`（動作中）を維持した状態で、温度を 26.1℃ / 26.0℃ / 25.9℃ に順に設定して比較する | 26.1℃では `tempStopConditionMet=false` のまま停止しない。26.0℃と25.9℃では `tempStopConditionMet=true` となり、`currentState=0` に遷移してファン停止する |26.1℃では `tempStopConditionMet=false` のまま停止しない。26.0℃と25.9℃では `tempStopConditionMet=true` となり、`currentState=0` に遷移してファン停止した| [〇] |
+| 8 | 無音時間境界（60秒） | 無音継続時間を 59999ms / 60000ms / 60001ms で比較 | 59999msでは停止しない。60000ms以上で停止条件成立 | 59999msでは停止しない。60000ms以上で停止条件成立を確認した | [〇] |
 | 9 | 競合時の優先順位 | 動作中に「ボタン押下」と「自動停止条件成立」を同一周回で発生させる | 分岐順どおり手動停止（`handleStop()`）が優先され、state=2へ遷移 | | [ ] |
 
 ### 5-3. 異常系テスト
