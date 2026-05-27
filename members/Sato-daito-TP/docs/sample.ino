@@ -1,26 +1,5 @@
-//#include <Arduino.h>
+/*#include <Arduino.h>
 
-#if defined(ARDUINO) || __has_include(<Arduino.h>)
-#include <Arduino.h>
-#else
-#define INPUT 0x0
-#define OUTPUT 0x1
-#define INPUT_PULLUP 0x2
-#define LOW 0x0
-#define HIGH 0x1
-#define A0 14
-inline void pinMode(int, int) {}
-inline void digitalWrite(int, int) {}
-inline int digitalRead(int) { return LOW; }
-inline int analogRead(int) { return 0; }
-inline void delay(unsigned long) {}
-inline unsigned long millis() { return 0; }
-struct SerialMock {
-  void begin(long) {}
-  void println(int) {}
-};
-static SerialMock Serial;
-#endif
 // ===== ピン定義 =====
 const int PIN_BUTTON    = 4;
 const int PIN_MODE      = 5;
@@ -205,4 +184,4 @@ void blinkLED(int pin, unsigned long now, int interval) {
     digitalWrite(pin, !digitalRead(pin));
     lastMillis_LED = now;
   }
-}
+}*/
